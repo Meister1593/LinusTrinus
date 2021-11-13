@@ -4,6 +4,9 @@ import json
 import logging
 import socket
 import struct
+import time
+import sys
+
 from pprint import pformat
 from threading import Thread
 
@@ -14,7 +17,9 @@ log = logging.getLogger(__name__)
 
 class Sender(Thread):
     end = False
-    buffer_size = 1024
+    buffer_size = 12800
+    avg_send_time = 0
+    avg_count = 0
 
     def __init__(self, server, client_port=7777, server_port=5555):
         Thread.__init__(self)
@@ -58,15 +63,23 @@ class Sender(Thread):
             self.recv()
 
     def send(self):
+        start_time = time.time()
         scr = self.framebuf.get()
         self.sock.send(struct.pack(">i", len(scr)))
         self.sock.send(scr)
+        processed_time = time.time() - start_time
+        self.avg_send_time = ((self.avg_send_time * self.avg_count) + processed_time) / (self.avg_count + 1)
+
+        self.avg_count += 1
 
     def recv(self):
         try:
             t = self.sock.recv(1)
             for i in range(t.count(b"e")):
                 self.send()
+            if self.avg_count > 10:
+                sys.stdout.write(f"\ravg send time ms: {round(self.avg_send_time * 100, 3)}")
+                self.avg_count = 0
         except ConnectionResetError:
             log.info("Connection closed")
             self.end = True

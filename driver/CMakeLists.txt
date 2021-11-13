@@ -22,7 +22,7 @@ set(SDL_REQUIRED_LIBRARIES SDL2)
 if(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
   add_definitions(-DLINUX -DPOSIX)
   set(ARCH_TARGET linux64)
-  set(LIB_DIR /usr/lib/x86_64-linux-gnu/)
+  #set(LIB_DIR /usr/lib/x86_64-linux-gnu/)
 
   if(${PLATFORM} MATCHES 32)
     message(WARNING "OpenVR x86 binaries not provided on GNU/Linux.")
@@ -105,7 +105,13 @@ endif()
 ## LIBRARIES ##
 
 ## OpenGL / GLU
+
+cmake_policy (SET CMP0072 NEW)
+#set(OpenGL_GL_PREFERENCE "GLVND")
 find_package(OpenGL REQUIRED)
+
+
+
 
 ## GLEW 1.11
 if(${CMAKE_SYSTEM_NAME} MATCHES "Linux")

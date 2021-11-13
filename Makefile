@@ -1,2 +1,2 @@
 all:
-	cd samples && bash make.sh
+	cd driver && bash docker_make.sh

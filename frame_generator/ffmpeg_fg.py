@@ -1,5 +1,8 @@
-import subprocess
 import os
+import subprocess
+import time
+import re
+
 from logging import getLogger
 from threading import Thread
 
@@ -12,14 +15,21 @@ class FfmpegFrameGenerator(Thread):
     end = False
     framebuf: DropQueue
 
-    width = 800 * 2
-    height = 600
+    window_moved = False
 
-    framerate = 30
+    width = 640
+    height = 480
+
+    bound_x = "+0"
+    old_bound_x = "+0"
+    bound_y = "+0"
+    old_bound_x = "+0"
+
+    framerate = 60
     optirun = False
     vsync = 2
 
-    buffer_size = 1024 * 10
+    buffer_size = 1024 * 2
 
     def __init__(self, settings: dict, buf: DropQueue):
         super().__init__()
@@ -27,8 +37,12 @@ class FfmpegFrameGenerator(Thread):
         self.settings = settings
 
     @property
-    def size(self):
+    def video_size(self) -> str:
         return f"{self.width}x{self.height}"
+
+    @property
+    def boundaries(self) -> str:
+        return f"+{self.bound_x},{self.bound_y}"
 
     @staticmethod
     def api(optirun=False, **kwargs) -> str:
@@ -40,44 +54,83 @@ class FfmpegFrameGenerator(Thread):
         cmd += " -"
         return cmd
 
+    def get_window_data_from_user(self, window_name: str, is_parallel: bool) -> int:
+            while True:
+                p = subprocess.Popen(
+                    f'xwininfo -name "{window_name}"',
+                    shell=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                text = p.communicate()[0]
+                window_id = re.findall(r"Window id: 0x([\da-f]+)", text.decode())
+                if window_id:
+                    window_id = int(window_id[0], 16)
+                    window_data = re.findall(r"-geometry (\d+)x(\d+)([-+]\d*)([-+]\d*)", text.decode())[0]
+                    width = window_data[0]
+                    height = window_data[1]
+                    bound_x = window_data[2]
+                    bound_y = window_data[3]
+                    if not is_parallel:
+                        return (window_id, width, height, bound_x, bound_y)
+        
+                    self.window_moved = (bound_x != self.old_bound_x) or (bound_y != self.old_bound_y)
+                    self.old_bound_x = bound_x
+                    self.old_bound_y = bound_y
+                    time.sleep(0.5)
+                else:
+                    return (None, 0, 0, 0, 0)
+
     def run(self):
         self.end = False
 
-        params = {
-            "loglevel": "error",
-            "s": self.size,
-            "framerate": self.framerate,
-            "i": "{}+64,24".format(os.getenv("DISPLAY")),
-            # 'qmin:v': 19,
-            "f": "mjpeg",
-            "vsync": self.vsync,
-        }
-        ffmpeg_cmd = self.api(self.optirun, **params)
-        log.info("ffmpeg cmd: %s", ffmpeg_cmd)
-        p = subprocess.Popen(
-            ffmpeg_cmd.split(),
-            shell=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            stdin=subprocess.PIPE,
-        )
-
-        data = bytearray()
-        start = -1
+        window_id = None
+        while not window_id:
+            window_id, self.width, self.height, self.bound_x, self.bound_y = self.get_window_data_from_user("SteamVR Compositor", False)
+        watcher_task = self.get_window_data_from_user
+        watcher_data = [ "SteamVR Compositor", True ]
+        t = Thread(target=watcher_task, args=("SteamVR Compositor", True))
+        t.start()
         while not self.end:
-            data += p.stdout.read(self.buffer_size)
+            window_id, self.width, self.height, self.bound_x, self.bound_y = self.get_window_data_from_user("SteamVR Compositor", False)
+            params = {
+                "loglevel": "error",
+                "framerate": self.framerate,
+                "video_size": self.video_size,
+                "i": f"%s{self.boundaries}" % os.getenv("DISPLAY", ":0.0"),
+                'qmin:v': 1,
+                'qmax:v': 8,
+                "f": "mjpeg",
+                "vsync": self.vsync,
+              }
+            ffmpeg_cmd = self.api(self.optirun, **params)
+            log.info("ffmpeg cmd: %s", ffmpeg_cmd)
+            p = subprocess.Popen(
+                ffmpeg_cmd.split(),
+                shell=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                stdin=subprocess.PIPE,
+            )
 
-            if start == -1:
-                start = data.find(b"\xFF\xD8\xFF")
-                continue
-            else:
-                end = data.find(b"\xFF\xD9")
+            data = bytearray()
+            start = -1
+            while not self.end and not self.window_moved:
+                data += p.stdout.read(self.buffer_size)
 
-            if end != -1 and start != -1:
-                frame = data[start : end + 1]
-                self.framebuf.put(frame)
+                if start == -1:
+                    start = data.find(b"\xFF\xD8\xFF")
+                    continue
+                else:
+                    end = data.find(b"\xFF\xD9")
+    
+                if end != -1 and start != -1:
+                    frame = data[start : end + 1]
+                    self.framebuf.put(frame)
 
-                data = data[end + 2 :]
-                start = -1
-
-        log.info("FrameGenerator end")
+                    data = data[end + 2 :]
+                    start = -1
+            p.kill()
+            if self.window_moved:
+                self.window_moved = False
+            log.info("FrameGenerator end")

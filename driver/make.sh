@@ -7,7 +7,9 @@ else
 fi
 
 # Compile
-cmake . -DCMAKE_PREFIX_PATH=/opt/Qt/5.6/gcc_64/lib/cmake -DCMAKE_BUILD_TYPE=Release
+#CMAKE_PATH=/opt/Qt/5.6/gcc_64/lib/cmake
+CMAKE_PATH=/usr/lib/cmake
+cmake . -DCMAKE_PREFIX_PATH=$CMAKE_PATH -DCMAKE_BUILD_TYPE=Release
 make -j4
 
 STEAM_PATH=~/.steam/steam
