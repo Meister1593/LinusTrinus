@@ -12,7 +12,6 @@ TrinusVR screen streaming server for Linux
 ## Dependencies
 
 * Python3 / Pypy3
-* evdev (optional)
 * ffmpeg
 * xwininfo (to capture vr window)
 * TrinusVR android client (tested on 2.2.1)
